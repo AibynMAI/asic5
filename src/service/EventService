@@ -1,0 +1,47 @@
+package service;
+
+import domain.Event;
+import repository.EventRepository;
+import exception.*;
+import java.util.*;
+
+public class EventService {
+
+    private final EventRepository repo;
+    private final List<Event> pool = new ArrayList<>(); // Data Pool
+
+    public EventService(EventRepository repo) {
+        this.repo = repo;
+    }
+
+    public Event create(Event e) {
+        if (e.getTitle().isBlank())
+            throw new ValidationException("Empty title");
+
+        Event saved = repo.save(e);
+        pool.add(saved);
+        return saved;
+    }
+
+    public Event get(int id) {
+        return repo.findById(id)
+                .orElseThrow(() -> new NotFoundException("Event not found"));
+    }
+
+    public List<Event> all() {
+        return pool.stream()
+                .sorted(Comparator.comparing(Event::getTitle)) // lambda
+                .toList();
+    }
+
+    public List<Event> filterByLocation(String loc) {
+        return pool.stream()
+                .filter(e -> e.getLocation().equalsIgnoreCase(loc))
+                .toList();
+    }
+
+    public void delete(int id) {
+        repo.delete(id);
+        pool.removeIf(e -> e.getId() == id);
+    }
+}
