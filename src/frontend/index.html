@@ -5,27 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Event System — Organizers</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 900px; margin: 30px auto; padding: 0 16px; }
+        body { font-family: Arial, sans-serif; max-width: 980px; margin: 30px auto; padding: 0 16px; }
         h1 { margin-bottom: 6px; }
         .muted { color:#666; margin-top:0; }
-        .card { border:1px solid #ddd; border-radius:10px; padding:16px; margin:16px 0; }
+        .card { border:1px solid #ddd; border-radius:12px; padding:16px; margin:16px 0; }
         label { display:block; font-size: 13px; color:#444; margin: 10px 0 6px; }
-        input { width: 100%; padding:10px; border-radius:8px; border:1px solid #ccc; }
-        button { padding:10px 14px; border-radius:8px; border:0; cursor:pointer; }
+        input { width: 100%; padding:10px; border-radius:10px; border:1px solid #ccc; }
+        button { padding:10px 14px; border-radius:10px; border:0; cursor:pointer; }
         button.primary { background:#0b5; color:white; }
         button.secondary { background:#eee; }
+        button.danger { background:#e33; color:white; }
+        button.warn { background:#f2b100; color:#1b1b1b; }
+        button:disabled { opacity: .6; cursor:not-allowed; }
         .row { display:flex; gap:10px; flex-wrap: wrap; }
         .row > div { flex: 1; min-width: 220px; }
         .actions { display:flex; gap:10px; align-items:center; margin-top: 12px; flex-wrap: wrap; }
-        .status { padding:10px; border-radius:8px; margin-top: 10px; display:none; }
+        .status { padding:10px; border-radius:10px; margin-top: 10px; display:none; white-space: pre-wrap; }
         .status.ok { background:#e7fff1; border:1px solid #b8f0cf; color:#124b2a; }
         .status.err { background:#fff0f0; border:1px solid #f2bcbc; color:#7a1b1b; }
         table { width:100%; border-collapse: collapse; }
-        th, td { border-bottom:1px solid #eee; padding:10px; text-align:left; }
+        th, td { border-bottom:1px solid #eee; padding:10px; text-align:left; vertical-align: top; }
         th { background:#fafafa; }
         .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:#f2f2f2; font-size:12px; }
         .topbar { display:flex; justify-content: space-between; align-items: center; gap:10px; flex-wrap: wrap;}
         .small { font-size: 12px; color:#666; }
+        .inline-edit { display:none; margin-top:8px; padding:10px; border:1px dashed #ddd; border-radius:10px; background:#fcfcfc; }
+        .mini-actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     </style>
 </head>
 <body>
@@ -36,7 +42,7 @@
         <p class="muted">Frontend connected to your REST API on <span class="pill" id="apiBaseLabel"></span></p>
     </div>
     <div class="small">
-        Tip: keep <b>ApiMain</b> running.
+        Keep <b>ApiMain</b> running on port <span class="pill">7070</span>
     </div>
 </div>
 
@@ -71,7 +77,7 @@
 <div class="card">
     <div class="actions" style="justify-content: space-between;">
         <h2 style="margin:0;">All organizers</h2>
-        <span class="pill" id="countPill">0</span>
+        <span class="pill">Count: <span id="countPill">0</span></span>
     </div>
 
     <table>
@@ -81,19 +87,19 @@
             <th>Name</th>
             <th>Email</th>
             <th>Organization</th>
+            <th style="width:210px;">Actions</th>
         </tr>
         </thead>
-        <tbody id="tbody">
-        <!-- rows -->
-        </tbody>
+        <tbody id="tbody"></tbody>
     </table>
 </div>
 
 <script>
     // ===== CONFIG =====
+    // (используем 127.0.0.1 чтобы избежать IPv6 ::1 проблем на mac)
     const API_BASE = "http://127.0.0.1:7070";
 
-    // ===== UI elements =====
+    // ===== UI =====
     const apiBaseLabel = document.getElementById("apiBaseLabel");
     const nameEl = document.getElementById("name");
     const emailEl = document.getElementById("email");
@@ -113,41 +119,16 @@
         okBox.style.display = "block";
         errBox.style.display = "none";
     }
-
     function showErr(msg) {
         errBox.textContent = msg;
         errBox.style.display = "block";
         okBox.style.display = "none";
     }
-
     function clearStatus() {
         okBox.style.display = "none";
         errBox.style.display = "none";
+        hint.textContent = "";
     }
-
-    function renderTable(list) {
-        tbody.innerHTML = "";
-        countPill.textContent = String(list.length);
-
-        if (!Array.isArray(list) || list.length === 0) {
-            const tr = document.createElement("tr");
-            tr.innerHTML = `<td colspan="4" style="color:#666;">No organizers yet</td>`;
-            tbody.appendChild(tr);
-            return;
-        }
-
-        for (const o of list) {
-            const tr = document.createElement("tr");
-            tr.innerHTML = `
-        <td>${o.id ?? ""}</td>
-        <td>${escapeHtml(o.name ?? "")}</td>
-        <td>${escapeHtml(o.email ?? "")}</td>
-        <td>${escapeHtml(o.organization ?? "")}</td>
-      `;
-            tbody.appendChild(tr);
-        }
-    }
-
     function escapeHtml(s) {
         return String(s)
             .replaceAll("&","&amp;")
@@ -157,24 +138,90 @@
             .replaceAll("'","&#039;");
     }
 
+    async function apiGet(path) {
+        const res = await fetch(`${API_BASE}${path}`);
+        const text = await res.text();
+        return { res, text };
+    }
+
+    async function apiSend(path, method, bodyObj) {
+        const res = await fetch(`${API_BASE}${path}`, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: bodyObj ? JSON.stringify(bodyObj) : undefined
+        });
+        const text = await res.text();
+        return { res, text };
+    }
+
     async function loadOrganizers() {
         clearStatus();
         hint.textContent = "Loading...";
         try {
-            const res = await fetch(`${API_BASE}/organizers`);
-            const text = await res.text();
-
+            const { res, text } = await apiGet("/organizers");
             if (!res.ok) {
                 showErr(`GET /organizers failed (${res.status}): ${text}`);
+                hint.textContent = "";
                 return;
             }
-
             const data = JSON.parse(text);
-            renderTable(data);
+            renderTable(Array.isArray(data) ? data : []);
             hint.textContent = "Loaded.";
         } catch (e) {
-            showErr("Cannot connect to API. Is ApiMain running on port 7070?");
+            showErr("Cannot connect to API. Is ApiMain running?");
             hint.textContent = "";
+        }
+    }
+
+    function renderTable(list) {
+        tbody.innerHTML = "";
+        countPill.textContent = String(list.length);
+
+        if (list.length === 0) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td colspan="5" style="color:#666;">No organizers yet</td>`;
+            tbody.appendChild(tr);
+            return;
+        }
+
+        for (const o of list) {
+            const id = o.id;
+
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+        <td class="mono">${id}</td>
+        <td>${escapeHtml(o.name ?? "")}</td>
+        <td>${escapeHtml(o.email ?? "")}</td>
+        <td>${escapeHtml(o.organization ?? "")}</td>
+        <td>
+          <div class="mini-actions">
+            <button class="warn" data-action="edit" data-id="${id}">Edit</button>
+            <button class="danger" data-action="delete" data-id="${id}">Delete</button>
+          </div>
+
+          <div class="inline-edit" id="edit-${id}">
+            <div class="row">
+              <div>
+                <label>Name</label>
+                <input id="e-name-${id}" value="${escapeHtml(o.name ?? "")}">
+              </div>
+              <div>
+                <label>Email</label>
+                <input id="e-email-${id}" value="${escapeHtml(o.email ?? "")}">
+              </div>
+              <div>
+                <label>Organization</label>
+                <input id="e-org-${id}" value="${escapeHtml(o.organization ?? "")}">
+              </div>
+            </div>
+            <div class="mini-actions">
+              <button class="primary" data-action="save" data-id="${id}">Save</button>
+              <button class="secondary" data-action="cancel" data-id="${id}">Cancel</button>
+            </div>
+          </div>
+        </td>
+      `;
+            tbody.appendChild(tr);
         }
     }
 
@@ -194,41 +241,110 @@
 
         hint.textContent = "Creating...";
         try {
-            const res = await fetch(`${API_BASE}/organizers`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
+            const { res, text } = await apiSend("/organizers", "POST", payload);
 
-            const text = await res.text();
-            let data;
-            try { data = JSON.parse(text); } catch { data = { raw: text }; }
+            let data = null;
+            try { data = JSON.parse(text); } catch {}
 
             if (res.status === 201) {
-                showOk(`Created! New id = ${data.id}`);
-                hint.textContent = "";
-                // clear inputs (optional)
-                // nameEl.value = ""; emailEl.value = ""; orgEl.value = "";
+                showOk(`Created ✅ (id: ${data?.id ?? "?"})`);
                 await loadOrganizers();
                 return;
             }
 
-            // typical errors:
-            // 400 -> validation
-            // 409 -> email exists
             const msg = data?.error ? data.error : text;
-            showErr(`POST /organizers failed (${res.status}): ${msg}`);
+            showErr(`Create failed (${res.status}): ${msg}`);
             hint.textContent = "";
         } catch (e) {
-            showErr("Cannot connect to API. Is ApiMain running on port 7070?");
+            showErr("Cannot connect to API. Is ApiMain running?");
             hint.textContent = "";
         }
     }
 
+    async function deleteOrganizer(id) {
+        clearStatus();
+        if (!confirm(`Delete organizer id=${id}?`)) return;
+
+        hint.textContent = `Deleting ${id}...`;
+        try {
+            const { res, text } = await apiSend(`/organizers/${id}`, "DELETE");
+
+            if (res.ok) {
+                showOk(`Deleted ✅ (id: ${id})`);
+                await loadOrganizers();
+                return;
+            }
+
+            let data = null;
+            try { data = JSON.parse(text); } catch {}
+            showErr(`Delete failed (${res.status}): ${data?.error ?? text}`);
+            hint.textContent = "";
+        } catch (e) {
+            showErr("Cannot connect to API. Is ApiMain running?");
+            hint.textContent = "";
+        }
+    }
+
+    function toggleEdit(id, show) {
+        const box = document.getElementById(`edit-${id}`);
+        if (!box) return;
+        box.style.display = show ? "block" : "none";
+    }
+
+    async function saveEdit(id) {
+        clearStatus();
+
+        const payload = {
+            name: document.getElementById(`e-name-${id}`).value.trim(),
+            email: document.getElementById(`e-email-${id}`).value.trim(),
+            organization: document.getElementById(`e-org-${id}`).value.trim()
+        };
+
+        if (!payload.name || !payload.email || !payload.organization) {
+            showErr("Fill all fields in edit form.");
+            return;
+        }
+
+        hint.textContent = `Updating ${id}...`;
+        try {
+            const { res, text } = await apiSend(`/organizers/${id}`, "PUT", payload);
+
+            if (res.ok) {
+                showOk(`Updated ✅ (id: ${id})`);
+                toggleEdit(id, false);
+                await loadOrganizers();
+                return;
+            }
+
+            let data = null;
+            try { data = JSON.parse(text); } catch {}
+            showErr(`Update failed (${res.status}): ${data?.error ?? text}`);
+            hint.textContent = "";
+        } catch (e) {
+            showErr("Cannot connect to API. Is ApiMain running?");
+            hint.textContent = "";
+        }
+    }
+
+    // event delegation for table buttons
+    tbody.addEventListener("click", async (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+
+        const action = btn.dataset.action;
+        const id = btn.dataset.id;
+
+        if (!action || !id) return;
+
+        if (action === "delete") await deleteOrganizer(id);
+        if (action === "edit") toggleEdit(id, true);
+        if (action === "cancel") toggleEdit(id, false);
+        if (action === "save") await saveEdit(id);
+    });
+
     createBtn.addEventListener("click", createOrganizer);
     reloadBtn.addEventListener("click", loadOrganizers);
 
-    // auto load on start
     loadOrganizers();
 </script>
 
