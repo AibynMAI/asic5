@@ -1,0 +1,15 @@
+### Ping
+GET http://127.0.0.1:7070/ping
+
+### Create organizer
+POST http://127.0.0.1:7070/organizers
+Content-Type: application/json
+
+{
+  "name": "Aibyn",
+  "email": "aibyn@mail.com",
+  "organization": "AITU"
+}
+
+### Get all organizers
+GET http://127.0.0.1:7070/organizers

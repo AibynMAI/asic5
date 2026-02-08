@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Event System — Organizers</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 30px auto; padding: 0 16px; }
+        h1 { margin-bottom: 6px; }
+        .muted { color:#666; margin-top:0; }
+        .card { border:1px solid #ddd; border-radius:10px; padding:16px; margin:16px 0; }
+        label { display:block; font-size: 13px; color:#444; margin: 10px 0 6px; }
+        input { width: 100%; padding:10px; border-radius:8px; border:1px solid #ccc; }
+        button { padding:10px 14px; border-radius:8px; border:0; cursor:pointer; }
+        button.primary { background:#0b5; color:white; }
+        button.secondary { background:#eee; }
+        .row { display:flex; gap:10px; flex-wrap: wrap; }
+        .row > div { flex: 1; min-width: 220px; }
+        .actions { display:flex; gap:10px; align-items:center; margin-top: 12px; flex-wrap: wrap; }
+        .status { padding:10px; border-radius:8px; margin-top: 10px; display:none; }
+        .status.ok { background:#e7fff1; border:1px solid #b8f0cf; color:#124b2a; }
+        .status.err { background:#fff0f0; border:1px solid #f2bcbc; color:#7a1b1b; }
+        table { width:100%; border-collapse: collapse; }
+        th, td { border-bottom:1px solid #eee; padding:10px; text-align:left; }
+        th { background:#fafafa; }
+        .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:#f2f2f2; font-size:12px; }
+        .topbar { display:flex; justify-content: space-between; align-items: center; gap:10px; flex-wrap: wrap;}
+        .small { font-size: 12px; color:#666; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <div>
+        <h1>Organizers</h1>
+        <p class="muted">Frontend connected to your REST API on <span class="pill" id="apiBaseLabel"></span></p>
+    </div>
+    <div class="small">
+        Tip: keep <b>ApiMain</b> running.
+    </div>
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Create organizer</h2>
+
+    <div class="row">
+        <div>
+            <label for="name">Name</label>
+            <input id="name" placeholder="Aibyn" />
+        </div>
+        <div>
+            <label for="email">Email</label>
+            <input id="email" placeholder="aibyn2@mail.com" />
+        </div>
+        <div>
+            <label for="org">Organization</label>
+            <input id="org" placeholder="AITU" />
+        </div>
+    </div>
+
+    <div class="actions">
+        <button class="primary" id="createBtn">Create</button>
+        <button class="secondary" id="reloadBtn">Reload list</button>
+        <span class="small" id="hint"></span>
+    </div>
+
+    <div class="status ok" id="okBox"></div>
+    <div class="status err" id="errBox"></div>
+</div>
+
+<div class="card">
+    <div class="actions" style="justify-content: space-between;">
+        <h2 style="margin:0;">All organizers</h2>
+        <span class="pill" id="countPill">0</span>
+    </div>
+
+    <table>
+        <thead>
+        <tr>
+            <th style="width:70px;">ID</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Organization</th>
+        </tr>
+        </thead>
+        <tbody id="tbody">
+        <!-- rows -->
+        </tbody>
+    </table>
+</div>
+
+<script>
+    // ===== CONFIG =====
+    const API_BASE = "http://127.0.0.1:7070";
+
+    // ===== UI elements =====
+    const apiBaseLabel = document.getElementById("apiBaseLabel");
+    const nameEl = document.getElementById("name");
+    const emailEl = document.getElementById("email");
+    const orgEl = document.getElementById("org");
+    const createBtn = document.getElementById("createBtn");
+    const reloadBtn = document.getElementById("reloadBtn");
+    const okBox = document.getElementById("okBox");
+    const errBox = document.getElementById("errBox");
+    const tbody = document.getElementById("tbody");
+    const countPill = document.getElementById("countPill");
+    const hint = document.getElementById("hint");
+
+    apiBaseLabel.textContent = API_BASE;
+
+    function showOk(msg) {
+        okBox.textContent = msg;
+        okBox.style.display = "block";
+        errBox.style.display = "none";
+    }
+
+    function showErr(msg) {
+        errBox.textContent = msg;
+        errBox.style.display = "block";
+        okBox.style.display = "none";
+    }
+
+    function clearStatus() {
+        okBox.style.display = "none";
+        errBox.style.display = "none";
+    }
+
+    function renderTable(list) {
+        tbody.innerHTML = "";
+        countPill.textContent = String(list.length);
+
+        if (!Array.isArray(list) || list.length === 0) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td colspan="4" style="color:#666;">No organizers yet</td>`;
+            tbody.appendChild(tr);
+            return;
+        }
+
+        for (const o of list) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+        <td>${o.id ?? ""}</td>
+        <td>${escapeHtml(o.name ?? "")}</td>
+        <td>${escapeHtml(o.email ?? "")}</td>
+        <td>${escapeHtml(o.organization ?? "")}</td>
+      `;
+            tbody.appendChild(tr);
+        }
+    }
+
+    function escapeHtml(s) {
+        return String(s)
+            .replaceAll("&","&amp;")
+            .replaceAll("<","&lt;")
+            .replaceAll(">","&gt;")
+            .replaceAll('"',"&quot;")
+            .replaceAll("'","&#039;");
+    }
+
+    async function loadOrganizers() {
+        clearStatus();
+        hint.textContent = "Loading...";
+        try {
+            const res = await fetch(`${API_BASE}/organizers`);
+            const text = await res.text();
+
+            if (!res.ok) {
+                showErr(`GET /organizers failed (${res.status}): ${text}`);
+                return;
+            }
+
+            const data = JSON.parse(text);
+            renderTable(data);
+            hint.textContent = "Loaded.";
+        } catch (e) {
+            showErr("Cannot connect to API. Is ApiMain running on port 7070?");
+            hint.textContent = "";
+        }
+    }
+
+    async function createOrganizer() {
+        clearStatus();
+
+        const payload = {
+            name: nameEl.value.trim(),
+            email: emailEl.value.trim(),
+            organization: orgEl.value.trim()
+        };
+
+        if (!payload.name || !payload.email || !payload.organization) {
+            showErr("Fill all fields: name, email, organization");
+            return;
+        }
+
+        hint.textContent = "Creating...";
+        try {
+            const res = await fetch(`${API_BASE}/organizers`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const text = await res.text();
+            let data;
+            try { data = JSON.parse(text); } catch { data = { raw: text }; }
+
+            if (res.status === 201) {
+                showOk(`Created! New id = ${data.id}`);
+                hint.textContent = "";
+                // clear inputs (optional)
+                // nameEl.value = ""; emailEl.value = ""; orgEl.value = "";
+                await loadOrganizers();
+                return;
+            }
+
+            // typical errors:
+            // 400 -> validation
+            // 409 -> email exists
+            const msg = data?.error ? data.error : text;
+            showErr(`POST /organizers failed (${res.status}): ${msg}`);
+            hint.textContent = "";
+        } catch (e) {
+            showErr("Cannot connect to API. Is ApiMain running on port 7070?");
+            hint.textContent = "";
+        }
+    }
+
+    createBtn.addEventListener("click", createOrganizer);
+    reloadBtn.addEventListener("click", loadOrganizers);
+
+    // auto load on start
+    loadOrganizers();
+</script>
+
+</body>
+</html>
